@@ -44,8 +44,46 @@ esac
 ui_print " " "  -> Wild Kernels Supported: $ksu_supported"
 $ksu_supported || abort "  -> Non-GKI device, abort."
 
+device_sku=$(getprop ro.boot.product.hardware.sku 2>/dev/null)
+[ "$device_sku" ] || device_sku=$(grep -o 'androidboot.product.hardware.sku=[^ ]*' /proc/cmdline 2>/dev/null | cut -d= -f2)
+[ "$device_sku" ] || device_sku=$(grep -o 'androidboot.hardware.sku=[^ ]*' /proc/cmdline 2>/dev/null | cut -d= -f2)
+
+derive_nezha_kernel_only_payload() {
+  local derive_dir unpack_dir derive_img
+  derive_img="$AKHOME/boot-nezha-derive.img"
+  derive_dir="$AKHOME/.nezha-derive"
+  unpack_dir="$AKHOME/.nezha-unpack"
+
+  rm -rf "$derive_dir" "$unpack_dir" "$derive_img"
+  mkdir -p "$derive_dir" "$unpack_dir"
+  cp -af "$SPLITIMG"/. "$derive_dir"/
+  cp -f "$AKHOME/Image" "$derive_dir/kernel"
+  rm -f "$derive_dir/kernel_dtb"
+
+  (
+    cd "$derive_dir" &&
+    magiskboot repack "$BOOTIMG" "$derive_img" >/dev/null
+  ) || abort "  -> Failed to derive Nezha kernel-only payload."
+
+  (
+    cd "$unpack_dir" &&
+    magiskboot unpack -h "$derive_img" >/dev/null
+  ) || abort "  -> Failed to unpack derived Nezha payload."
+
+  [ -f "$unpack_dir/kernel" ] || abort "  -> Missing derived Nezha kernel payload."
+  cp -f "$unpack_dir/kernel" "$AKHOME/Image"
+
+  rm -rf "$derive_dir" "$unpack_dir" "$derive_img"
+}
+
 # boot install
 split_boot
+if [ "$kernel_version" = "6.12.23" ] && [ "$device_sku" = "nezha" ] && [ -f "$AKHOME/Image" ] && [ -f "$SPLITIMG/kernel_dtb" ]; then
+    ui_print " "
+    ui_print "Nezha 6.12 detected; deriving kernel-only payload"
+    ui_print "and preserving stock kernel_dtb for final repack..."
+    derive_nezha_kernel_only_payload
+fi
 if [ -f "split_img/ramdisk.cpio" ]; then
     unpack_ramdisk
     write_boot
